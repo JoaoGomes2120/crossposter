@@ -50,3 +50,11 @@ def terms():
     <p>joaogumes23w@outlook.com</p>
     </body></html>
     """
+
+@app.get("/auth/callback")
+def auth_callback():
+    return {"status": "callback ok"}
+
+@app.get("/tiktok9ASD673ZVjlamdnZqO7DIPfyWdfXZGE0.txt")
+def tiktok_verify():
+    return HTMLResponse("tiktok9ASD673ZVjlamdnZqO7DIPfyWdfXZGE0")
