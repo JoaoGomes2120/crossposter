@@ -55,6 +55,6 @@ def terms():
 def auth_callback():
     return {"status": "callback ok"}
 
-@app.get("/tiktok9ASD673ZVjlamdnZqO7DIPfyWdfXZGE0.txt")
+@app.get("/tiktok9emzl9xlyeT0KDdRDvSi5aULRsjNFXha.txt")
 def tiktok_verify():
-    return HTMLResponse("tiktok-developers-site-verification=9ASD673ZVjIamdnZqO7DlPfyWdfXZGE0")
+    return HTMLResponse("tiktok-developers-site-verification=9emzl9xIyeT0KDdRDvSi5aULRsjNFXha")
