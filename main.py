@@ -57,4 +57,4 @@ def auth_callback():
 
 @app.get("/tiktok9ASD673ZVjlamdnZqO7DIPfyWdfXZGE0.txt")
 def tiktok_verify():
-    return HTMLResponse("tiktok9ASD673ZVjlamdnZqO7DIPfyWdfXZGE0")
+    return HTMLResponse("tiktok-developers-site-verification=9ASD673ZVjIamdnZqO7DlPfyWdfXZGE0")
