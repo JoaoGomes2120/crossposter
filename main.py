@@ -1,7 +1,14 @@
+import os
+import secrets
+import httpx
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 app = FastAPI()
+
+CLIENT_ID     = os.getenv("TIKTOK_CLIENT_ID")
+CLIENT_SECRET = os.getenv("TIKTOK_CLIENT_SECRET")
+REDIRECT_URI  = os.getenv("TIKTOK_REDIRECT_URI")
 
 @app.get("/")
 def root():
@@ -10,6 +17,49 @@ def root():
 @app.get("/health")
 def health():
     return {"healthy": True}
+
+@app.get("/login")
+def login():
+    state = secrets.token_urlsafe(16)
+    url = (
+        f"https://www.tiktok.com/v2/auth/authorize/"
+        f"?client_key={CLIENT_ID}"
+        f"&response_type=code"
+        f"&scope=user.info.basic,video.upload,video.publish"
+        f"&redirect_uri={REDIRECT_URI}"
+        f"&state={state}"
+    )
+    return RedirectResponse(url)
+
+@app.get("/auth/callback")
+async def auth_callback(code: str = None, state: str = None, error: str = None):
+    if error:
+        return {"error": error}
+    if not code:
+        return {"error": "codigo nao recebido"}
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://open.tiktokapis.com/v2/oauth/token/",
+            data={
+                "client_key":    CLIENT_ID,
+                "client_secret": CLIENT_SECRET,
+                "code":          code,
+                "grant_type":    "authorization_code",
+                "redirect_uri":  REDIRECT_URI,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+
+    data = resp.json()
+    if "access_token" in data:
+        return {
+            "status":        "autenticado",
+            "open_id":       data.get("open_id"),
+            "access_token":  data.get("access_token"),
+            "expires_in":    data.get("expires_in"),
+        }
+    return {"error": data}
 
 @app.get("/privacy", response_class=HTMLResponse)
 def privacy():
@@ -51,18 +101,6 @@ def terms():
     </body></html>
     """
 
-@app.get("/auth/callback")
-def auth_callback():
-    return {"status": "callback ok"}
-
 @app.get("/tiktok9emzl9xlyeT0KDdRDvSi5aULRsjNFXha.txt")
 def tiktok_verify():
-    return HTMLResponse("tiktok-developers-site-verification=9emzl9xIyeT0KDdRDvSi5aULRsjNFXha")
-
-@app.get("/tiktok9emzl9xIyeT0KDdRDvSi5aULRsjNFXha.txt")
-def tiktok_verify2():
-    return HTMLResponse("tiktok-developers-site-verification=9emzl9xIyeT0KDdRDvSi5aULRsjNFXha")
-
-@app.get("/.well-known/tiktok-developer-site-verification.txt")
-def tiktok_verify_wellknown():
     return HTMLResponse("tiktok-developers-site-verification=9emzl9xIyeT0KDdRDvSi5aULRsjNFXha")
