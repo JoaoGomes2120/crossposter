@@ -24,7 +24,7 @@ def turso_query(sql, args=[]):
     try:
         rs = result["results"][0]["response"]["result"]
         cols = [c["name"] for c in rs["cols"]]
-        return [dict(zip(cols, [v["value"] for v in row])) for row in rs["rows"]]
+        return [dict(zip(cols, [v.get("value") for v in row])) for row in rs["rows"]]
     except:
         return []
 
