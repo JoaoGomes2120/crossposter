@@ -95,6 +95,11 @@ async def add_video(user_id: str, source_url: str, caption: str):
 
     return {"status": "adicionado", "post_id": post_id}
 
+@app.post("/post-now")
+def post_now(post_id: str):
+    turso_execute("UPDATE video_posts SET status='FORCE_POST' WHERE id=?", [post_id])
+    return {"status": "ok"}
+
 @app.get("/videos")
 def get_videos(user_id: str):
     return turso_query(
@@ -126,6 +131,7 @@ def dashboard(user_id: str = ""):
   .video-item {{ display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #222; }}
   .badge {{ font-size: 11px; padding: 4px 10px; border-radius: 20px; font-weight: bold; }}
   .PENDING {{ background: #333; color: #aaa; }}
+  .FORCE_POST {{ background: #9a6a00; color: #fde047; }}
   .PUBLISHED {{ background: #1a3a2a; color: #4ade80; }}
   .FAILED {{ background: #3a1a1a; color: #f87171; }}
   .url {{ font-size: 11px; color: #666; margin-top: 2px; }}
@@ -182,10 +188,20 @@ async function loadVideos() {{
         <div style="font-size:13px;font-weight:500">${{v.caption}}</div>
         <div class="url">${{v.source_url}}</div>
       </div>
-      <span class="badge ${{v.status}}">${{v.status}}</span>
+      <div>
+        ${{ v.status === 'PENDING' ? `<button onclick="postNow('${{v.id}}')" style="width:auto;margin:0 10px;padding:4px 8px;font-size:11px;background:#444;">Postar Agora</button>` : '' }}
+        <span class="badge ${{v.status}}">${{v.status}}</span>
+      </div>
     </div>
   `).join('');
 }}
+
+async function postNow(postId) {{
+  await fetch(`/post-now?post_id=${{postId}}`, {{method:'POST'}});
+  alert('Vídeo movido para prioridade! Aguarde a mudança do status de FORCE_POST para PUBLISHED nos próximos segundos.');
+  loadVideos();
+}}
+
 async function addVideo() {{
   const url = document.getElementById('url').value.trim();
   const caption = document.getElementById('caption').value.trim();

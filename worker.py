@@ -78,6 +78,19 @@ def upload_to_tiktok(video_path, access_token, caption):
     return publish_id, None
 
 def determine_jobs_to_run():
+    # 1. Verificar forçados manualment ('Postar Agora')
+    force_posts = turso_query("SELECT * FROM video_posts WHERE status='FORCE_POST' ORDER BY created_at ASC LIMIT 1")
+    if force_posts:
+        post = force_posts[0]
+        user_info = turso_query("SELECT access_token FROM users WHERE id=?", [post["user_id"]])
+        if user_info:
+            return {
+                "post_id": post["id"],
+                "source_url": post["source_url"],
+                "caption": post["caption"],
+                "access_token": user_info[0]["access_token"],
+            }
+
     now = datetime.now(timezone.utc)
     hour = now.hour
 
