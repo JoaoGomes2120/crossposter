@@ -1,58 +1,39 @@
-import os, sqlite3
+import os, sqlite3, httpx, json
 
-TURSO_URL   = os.getenv("TURSO_URL")
-TURSO_TOKEN = os.getenv("TURSO_TOKEN")
+TURSO_URL   = "libsql://crossposter-joaogomes2120.aws-us-west-2.turso.io"
+TURSO_TOKEN = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3NzgxODc5ODQsImlkIjoiMDE5ZTA0NDEtZWEwMS03NWI1LWIzNDQtZjRhZWFjYWY2ZWY3IiwicmlkIjoiOWNmY2UzZTctOWZmNi00OWYyLTk1MDEtOTIyMjFjMzVmMDkzIn0.5bJpHG61VivN7kC1FkSZPHpqWar0NOOK7w-mt2kl2TAmJrjzAcNfjJyhM5Whm0u4jFNln78a9sK_SSEv0GPbAQ"
 
-def get_conn():
-    if TURSO_URL and TURSO_TOKEN:
-        import libsql_client
-        # usa Turso em produção
-        return libsql_client.create_client_sync(
-            url=TURSO_URL,
-            auth_token=TURSO_TOKEN,
-        )
-    # usa SQLite local em desenvolvimento
-    conn = sqlite3.connect("/tmp/crossposter.db")
-    conn.row_factory = sqlite3.Row
-    return conn
+TURSO_HTTP  = "https://crossposter-joaogomes2120.aws-us-west-2.turso.io"
+
+def turso_execute(sql, args=[]):
+    resp = httpx.post(
+        f"{TURSO_HTTP}/v2/pipeline",
+        headers={
+            "Authorization": f"Bearer {TURSO_TOKEN}",
+            "Content-Type": "application/json",
+        },
+        json={"requests": [
+            {"type": "execute", "stmt": {"sql": sql, "args": [{"type": "text", "value": str(a)} for a in args]}},
+            {"type": "close"}
+        ]},
+        timeout=10,
+    )
+    return resp.json()
+
+def turso_query(sql, args=[]):
+    result = turso_execute(sql, args)
+    try:
+        rs = result["results"][0]["response"]["result"]
+        cols = [c["name"] for c in rs["cols"]]
+        return [dict(zip(cols, [v["value"] for v in row])) for row in rs["rows"]]
+    except:
+        return []
 
 def init_db():
-    if TURSO_URL and TURSO_TOKEN:
-        import libsql_client
-        client = libsql_client.create_client_sync(
-            url=TURSO_URL,
-            auth_token=TURSO_TOKEN,
-        )
-        client.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                open_id TEXT UNIQUE,
-                access_token TEXT,
-                refresh_token TEXT,
-                expires_at TEXT
-            )
-        """)
-        client.execute("""
-            CREATE TABLE IF NOT EXISTS video_posts (
-                id TEXT PRIMARY KEY,
-                user_id TEXT,
-                source_url TEXT,
-                caption TEXT,
-                status TEXT DEFAULT 'PENDING',
-                publish_id TEXT,
-                error_msg TEXT,
-                created_at TEXT
-            )
-        """)
-        client.close()
-    else:
-        conn = sqlite3.connect("/tmp/crossposter.db")
-        conn.execute("""CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY, open_id TEXT UNIQUE,
-            access_token TEXT, refresh_token TEXT, expires_at TEXT)""")
-        conn.execute("""CREATE TABLE IF NOT EXISTS video_posts (
-            id TEXT PRIMARY KEY, user_id TEXT, source_url TEXT,
-            caption TEXT, status TEXT DEFAULT 'PENDING',
-            publish_id TEXT, error_msg TEXT, created_at TEXT)""")
-        conn.commit()
-        conn.close()
+    turso_execute("""CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY, open_id TEXT UNIQUE,
+        access_token TEXT, refresh_token TEXT, expires_at TEXT)""")
+    turso_execute("""CREATE TABLE IF NOT EXISTS video_posts (
+        id TEXT PRIMARY KEY, user_id TEXT, source_url TEXT,
+        caption TEXT, status TEXT DEFAULT 'PENDING',
+        publish_id TEXT, error_msg TEXT, created_at TEXT)""")

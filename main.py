@@ -1,8 +1,8 @@
-import os, secrets, uuid, sqlite3, json
+import os, secrets, uuid, json
 import httpx
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
-from db.database import init_db, get_conn
+from db.database import init_db, turso_execute, turso_query
 from datetime import datetime, timezone, timedelta
 
 app = FastAPI()
@@ -51,45 +51,38 @@ async def auth_callback(code: str = None, error: str = None):
     if "access_token" not in data:
         return {"error": data}
 
-    conn = get_conn()
-    user_id = str(uuid.uuid4())
-    open_id = data["open_id"]
+    open_id    = data["open_id"]
     expires_at = (datetime.now(timezone.utc) + timedelta(seconds=data["expires_in"])).isoformat()
 
-    existing = conn.execute("SELECT id FROM users WHERE open_id=?", (open_id,)).fetchone()
+    existing = turso_query("SELECT id FROM users WHERE open_id=?", [open_id])
     if existing:
-        user_id = existing["id"]
-        conn.execute("UPDATE users SET access_token=?, refresh_token=?, expires_at=? WHERE open_id=?",
-            (data["access_token"], data.get("refresh_token",""), expires_at, open_id))
+        user_id = existing[0]["id"]
+        turso_execute("UPDATE users SET access_token=?, refresh_token=?, expires_at=? WHERE open_id=?",
+            [data["access_token"], data.get("refresh_token",""), expires_at, open_id])
     else:
-        conn.execute("INSERT INTO users VALUES (?,?,?,?,?)",
-            (user_id, open_id, data["access_token"], data.get("refresh_token",""), expires_at))
-    conn.commit()
-    conn.close()
+        user_id = str(uuid.uuid4())
+        turso_execute("INSERT INTO users VALUES (?,?,?,?,?)",
+            [user_id, open_id, data["access_token"], data.get("refresh_token",""), expires_at])
 
     return RedirectResponse(f"/dashboard?user_id={user_id}")
 
 @app.post("/add-video")
 async def add_video(user_id: str, source_url: str, caption: str):
-    conn = get_conn()
-    post_id = str(uuid.uuid4())
-
-    user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    user = turso_query("SELECT * FROM users WHERE id=?", [user_id])
     if not user:
         return {"error": "usuario nao encontrado"}
 
-    conn.execute("INSERT INTO video_posts VALUES (?,?,?,?,?,?,?,?)",
-        (post_id, user_id, source_url, caption, "PENDING", None, None,
-         datetime.now(timezone.utc).isoformat()))
-    conn.commit()
-    conn.close()
+    post_id = str(uuid.uuid4())
+    turso_execute("INSERT INTO video_posts VALUES (?,?,?,?,?,?,?,?)",
+        [post_id, user_id, source_url, caption, "PENDING", "", "",
+         datetime.now(timezone.utc).isoformat()])
 
     if UPSTASH_URL and UPSTASH_TOKEN:
         job = json.dumps({
             "post_id":      post_id,
             "source_url":   source_url,
             "caption":      caption,
-            "access_token": user["access_token"],
+            "access_token": user[0]["access_token"],
         })
         async with httpx.AsyncClient() as client:
             await client.post(
@@ -102,18 +95,13 @@ async def add_video(user_id: str, source_url: str, caption: str):
 
 @app.get("/videos")
 def get_videos(user_id: str):
-    conn = get_conn()
-    rows = conn.execute(
-        "SELECT * FROM video_posts WHERE user_id=? ORDER BY created_at DESC", (user_id,)
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    return turso_query(
+        "SELECT * FROM video_posts WHERE user_id=? ORDER BY created_at DESC", [user_id]
+    )
 
 @app.get("/debug-users")
 def debug_users():
-    conn = get_conn()
-    users = conn.execute("SELECT id, open_id, expires_at FROM users").fetchall()
-    return [dict(u) for u in users]
+    return turso_query("SELECT id, open_id, expires_at FROM users")
 
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(user_id: str = ""):
