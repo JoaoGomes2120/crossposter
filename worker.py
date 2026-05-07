@@ -168,10 +168,12 @@ def process_job(job):
         video_path = os.path.join(tmpdir, "video.mp4")
         try:
             print("⬇ Baixando vídeo...")
+            turso_execute("UPDATE video_posts SET status='DOWNLOADING' WHERE id=?", [post_id])
             download_video(source_url, video_path)
             print("✓ Download concluído")
 
             print("⬆ Enviando para TikTok...")
+            turso_execute("UPDATE video_posts SET status='UPLOADING' WHERE id=?", [post_id])
             publish_id, error = upload_to_tiktok(video_path, access_token, caption)
 
             if error:

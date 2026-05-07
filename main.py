@@ -1,5 +1,6 @@
 import os, secrets, uuid, json
 import httpx
+import threading, subprocess
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
 from db.database import init_db, turso_execute, turso_query
@@ -14,6 +15,9 @@ REDIRECT_URI  = os.getenv("TIKTOK_REDIRECT_URI")
 @app.on_event("startup")
 def startup():
     init_db()
+    def run_worker():
+        subprocess.run(["python", "-u", "worker.py"])
+    threading.Thread(target=run_worker, daemon=True).start()
 
 @app.get("/login")
 def login():
@@ -132,6 +136,8 @@ def dashboard(user_id: str = ""):
   .badge {{ font-size: 11px; padding: 4px 10px; border-radius: 20px; font-weight: bold; }}
   .PENDING {{ background: #333; color: #aaa; }}
   .FORCE_POST {{ background: #9a6a00; color: #fde047; }}
+  .DOWNLOADING {{ background: #1e3a8a; color: #bfdbfe; }}
+  .UPLOADING {{ background: #3b0764; color: #e9d5ff; }}
   .PUBLISHED {{ background: #1a3a2a; color: #4ade80; }}
   .FAILED {{ background: #3a1a1a; color: #f87171; }}
   .url {{ font-size: 11px; color: #666; margin-top: 2px; }}
