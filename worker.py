@@ -1,21 +1,14 @@
-import os, time, sqlite3, tempfile, httpx, math
+import os, time, tempfile, httpx, math
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
+
 load_dotenv()
 
-import redis
 import yt_dlp
+from db.database import turso_query, turso_execute
 
-REDIS_URL     = os.getenv("REDIS_URL")
 CLIENT_ID     = os.getenv("TIKTOK_CLIENT_ID")
 CLIENT_SECRET = os.getenv("TIKTOK_CLIENT_SECRET")
-
-DB_PATH = "crossposter.db"  # banco local para testes
-
-r = redis.from_url(REDIS_URL)
-
-def get_next_job():
-    job = r.lpop("crossposter:queue")
-    return job
 
 def download_video(url, output_path):
     ydl_opts = {
@@ -84,15 +77,79 @@ def upload_to_tiktok(video_path, access_token, caption):
 
     return publish_id, None
 
-def process_job(job_data):
-    import json
-    job = json.loads(job_data)
+def determine_jobs_to_run():
+    now = datetime.now(timezone.utc)
+    hour = now.hour
+
+    pending_posts = turso_query("SELECT * FROM video_posts WHERE status='PENDING' ORDER BY created_at ASC LIMIT 100")
+    if not pending_posts: 
+        return None
+
+    # Agrupa apenas a primeira postagem PENDING de cada usuário (FIFO)
+    user_next_post = {}
+    for p in pending_posts:
+        if p["user_id"] not in user_next_post:
+            user_next_post[p["user_id"]] = p
+
+    for user_id, post in user_next_post.items():
+        # Capturar configs locais de postagem
+        cfg = turso_query("SELECT * FROM schedule_configs WHERE user_id=?", [user_id])
+        if not cfg:
+            cfg = {"posts_per_day": 1, "start_hour": 8, "end_hour": 22, "auto_delete": 1}
+        else:
+            cfg = cfg[0]
+
+        start_h = cfg["start_hour"]
+        end_h = cfg["end_hour"]
+        posts_per_day = cfg["posts_per_day"]
+        
+        # O post so entra pra avaliação se estivermos na janela diária pretendida
+        if not (start_h <= hour <= end_h):
+            continue 
+        
+        # Checar se ja atingiu a cota diária
+        today_str = now.strftime('%Y-%m-%d')
+        published_today = turso_query(
+            "SELECT id, published_at FROM video_posts WHERE user_id=? AND status='PUBLISHED' AND published_at LIKE ?", 
+            [user_id, f"{today_str}%"]
+        )
+        
+        count_today = len(published_today)
+        if count_today >= posts_per_day:
+            continue # Limite diário excedido
+
+        if count_today > 0:
+            # Verifica intervalo minimizado com relacao ao horario util
+            published_today.sort(key=lambda x: x["published_at"], reverse=True)
+            last_pub = datetime.fromisoformat(published_today[0]["published_at"])
+            
+            window_hours = end_h - start_h
+            if window_hours <= 0: window_hours = 1
+            interval_hours = window_hours / posts_per_day
+            
+            if (now - last_pub).total_seconds() < interval_hours * 3600:
+                continue # Ainda precisa de delay antes de postar
+
+        # Caso cumpra todas as regras de timing, enviar este item.
+        user_info = turso_query("SELECT access_token FROM users WHERE id=?", [user_id])
+        if not user_info:
+            continue
+            
+        return {
+            "post_id": post["id"],
+            "source_url": post["source_url"],
+            "caption": post["caption"],
+            "access_token": user_info[0]["access_token"],
+        }
+    return None
+
+def process_job(job):
     post_id     = job["post_id"]
     source_url  = job["source_url"]
     caption     = job["caption"]
     access_token= job["access_token"]
 
-    print(f"\n▶ Processando: {caption}")
+    print(f"\\n▶ Processando: {caption}")
 
     with tempfile.TemporaryDirectory() as tmpdir:
         video_path = os.path.join(tmpdir, "video.mp4")
@@ -106,18 +163,25 @@ def process_job(job_data):
 
             if error:
                 print(f"✗ Erro no upload: {error}")
+                turso_execute("UPDATE video_posts SET status='FAILED', error_msg=? WHERE id=?", [str(error), post_id])
             else:
                 print(f"✓ Publicado! publish_id: {publish_id}")
+                turso_execute("UPDATE video_posts SET status='PUBLISHED', publish_id=?, published_at=? WHERE id=?", 
+                              [publish_id, datetime.now(timezone.utc).isoformat(), post_id])
 
         except Exception as e:
             print(f"✗ Erro: {e}")
+            turso_execute("UPDATE video_posts SET status='FAILED', error_msg=? WHERE id=?", [str(e), post_id])
 
-print("🚀 Worker iniciado — aguardando jobs...")
-print(f"Conectado ao Redis: {REDIS_URL[:30]}...")
+print("🚀 Worker do CrossPoster reconfigurado para Agendamento — aguardando jobs...")
 
 while True:
-    job = get_next_job()
-    if job:
-        process_job(job)
-    else:
-        time.sleep(5)  # espera 5s e verifica novamente
+    try:
+        job = determine_jobs_to_run()
+        if job:
+            process_job(job)
+        else:
+            time.sleep(15)
+    except Exception as e:
+        print(f"Erro no loop do worker: {e}")
+        time.sleep(15)

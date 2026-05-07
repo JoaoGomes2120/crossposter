@@ -10,8 +10,6 @@ app = FastAPI()
 CLIENT_ID     = os.getenv("TIKTOK_CLIENT_ID")
 CLIENT_SECRET = os.getenv("TIKTOK_CLIENT_SECRET")
 REDIRECT_URI  = os.getenv("TIKTOK_REDIRECT_URI")
-UPSTASH_URL   = os.getenv("UPSTASH_REDIS_REST_URL")
-UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN")
 
 @app.on_event("startup")
 def startup():
@@ -67,6 +65,24 @@ async def auth_callback(code: str = None, error: str = None):
 
     return RedirectResponse(f"/dashboard?user_id={user_id}")
 
+@app.get("/config")
+def get_config(user_id: str):
+    cfg = turso_query("SELECT * FROM schedule_configs WHERE user_id=?", [user_id])
+    if cfg: return cfg[0]
+    return {"posts_per_day": 1, "start_hour": 8, "end_hour": 22, "auto_delete": 1}
+
+@app.post("/config")
+async def save_config(user_id: str, posts: int):
+    # Only exposing posts_per_day for simplicity in the UI to match user requests
+    existing = turso_query("SELECT user_id FROM schedule_configs WHERE user_id=?", [user_id])
+    if existing:
+        turso_execute("UPDATE schedule_configs SET posts_per_day=? WHERE user_id=?",
+                      [posts, user_id])
+    else:
+        turso_execute("INSERT INTO schedule_configs (user_id, posts_per_day) VALUES (?, ?)",
+                      [user_id, posts])
+    return {"status": "ok"}
+
 @app.post("/add-video")
 async def add_video(user_id: str, source_url: str, caption: str):
     user = turso_query("SELECT * FROM users WHERE id=?", [user_id])
@@ -74,23 +90,8 @@ async def add_video(user_id: str, source_url: str, caption: str):
         return {"error": "usuario nao encontrado"}
 
     post_id = str(uuid.uuid4())
-    turso_execute("INSERT INTO video_posts VALUES (?,?,?,?,?,?,?,?)",
-        [post_id, user_id, source_url, caption, "PENDING", "", "",
-         datetime.now(timezone.utc).isoformat()])
-
-    if UPSTASH_URL and UPSTASH_TOKEN:
-        job = json.dumps({
-            "post_id":      post_id,
-            "source_url":   source_url,
-            "caption":      caption,
-            "access_token": user[0]["access_token"],
-        })
-        async with httpx.AsyncClient() as client:
-            await client.post(
-                f"{UPSTASH_URL}/rpush/crossposter:queue",
-                headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"},
-                json=[job],
-            )
+    turso_execute("INSERT INTO video_posts (id, user_id, source_url, caption, status, created_at) VALUES (?,?,?,?,?,?)",
+        [post_id, user_id, source_url, caption, "PENDING", datetime.now(timezone.utc).isoformat()])
 
     return {"status": "adicionado", "post_id": post_id}
 
@@ -131,20 +132,45 @@ def dashboard(user_id: str = ""):
 </style>
 </head>
 <body>
-<h1>🎬 CrossPoster</h1>
+<div class="card" style="display:flex; justify-content:space-between; align-items:center;">
+  <div>
+    <h2 style="font-size:15px;margin-bottom:4px">Definições de Postagem Automática</h2>
+    <p style="font-size:12px;color:#aaa">O sistema publicará automaticamente na janela de 08:00 às 22:00.</p>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <label>Vídeos por dia:</label>
+    <input type="number" id="posts-per-day" min="1" max="10" value="1" style="width:60px; margin:0;" />
+    <button onclick="saveConfig()" style="width:auto; margin:0;">Salvar</button>
+  </div>
+</div>
 <div class="card">
-  <label>URL do vídeo (sua conta)</label>
+  <label>URL do vídeo (Sua conta)</label>
   <input type="text" id="url" placeholder="https://www.kwai.com/@voce/video/..."/>
   <label style="margin-top:12px;display:block">Legenda + hashtags</label>
   <textarea id="caption" placeholder="Legenda para o TikTok..."></textarea>
-  <button onclick="addVideo()">+ Adicionar à fila</button>
+  <button onclick="addVideo()">+ Fila de Automação</button>
 </div>
 <div class="card">
-  <h2 style="font-size:15px;margin-bottom:12px">Fila de publicação</h2>
+  <h2 style="font-size:15px;margin-bottom:12px">Fila e Publicados</h2>
   <div id="video-list"><p style="color:#666;font-size:13px">Carregando...</p></div>
 </div>
 <script>
 const USER_ID = "{user_id}";
+
+async function loadConfig() {{
+  const r = await fetch(`/config?user_id=${{USER_ID}}`);
+  if (r.ok) {{
+      const cfg = await r.json();
+      document.getElementById('posts-per-day').value = cfg.posts_per_day || 1;
+  }}
+}}
+
+async function saveConfig() {{
+  const posts = document.getElementById('posts-per-day').value;
+  await fetch(`/config?user_id=${{USER_ID}}&posts=${{posts}}`, {{method:'POST'}});
+  alert('Salvo com sucesso! Agora processaremos essa quantidade por dia.');
+}}
+
 async function loadVideos() {{
   const r = await fetch(`/videos?user_id=${{USER_ID}}`);
   const videos = await r.json();
@@ -169,6 +195,7 @@ async function addVideo() {{
   document.getElementById('caption').value = '';
   loadVideos();
 }}
+loadConfig();
 loadVideos();
 setInterval(loadVideos, 5000);
 </script>

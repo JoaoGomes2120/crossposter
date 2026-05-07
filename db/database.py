@@ -32,7 +32,18 @@ def init_db():
     turso_execute("""CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY, open_id TEXT UNIQUE,
         access_token TEXT, refresh_token TEXT, expires_at TEXT)""")
+    
     turso_execute("""CREATE TABLE IF NOT EXISTS video_posts (
         id TEXT PRIMARY KEY, user_id TEXT, source_url TEXT,
         caption TEXT, status TEXT DEFAULT 'PENDING',
         publish_id TEXT, error_msg TEXT, created_at TEXT)""")
+    
+    turso_execute("""CREATE TABLE IF NOT EXISTS schedule_configs (
+        user_id TEXT PRIMARY KEY,
+        posts_per_day INTEGER DEFAULT 1,
+        start_hour INTEGER DEFAULT 8,
+        end_hour INTEGER DEFAULT 22,
+        auto_delete BOOLEAN DEFAULT 1)""")
+
+    # Attempt to add published_at column to video_posts in case it doesn't exist
+    turso_execute("ALTER TABLE video_posts ADD COLUMN published_at TEXT;")
