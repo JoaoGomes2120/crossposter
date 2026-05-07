@@ -68,14 +68,32 @@ async def auth_callback(code: str = None, error: str = None):
     return RedirectResponse(f"/dashboard?user_id={user_id}")
 
 @app.post("/add-video")
-def add_video(user_id: str, source_url: str, caption: str):
+async def add_video(user_id: str, source_url: str, caption: str):
     conn = get_conn()
     post_id = str(uuid.uuid4())
+
+    user = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    if not user:
+        return {"error": "usuario nao encontrado"}
+
     conn.execute("INSERT INTO video_posts VALUES (?,?,?,?,?,?,?,?)",
         (post_id, user_id, source_url, caption, "PENDING", None, None,
          datetime.now(timezone.utc).isoformat()))
     conn.commit()
     conn.close()
+
+    redis_url = os.getenv("REDIS_URL")
+    if redis_url:
+        import redis as redis_lib, json
+        r = redis_lib.from_url(redis_url)
+        job = json.dumps({
+            "post_id":      post_id,
+            "source_url":   source_url,
+            "caption":      caption,
+            "access_token": user["access_token"],
+        })
+        r.rpush("crossposter:queue", job)
+
     return {"status": "adicionado", "post_id": post_id}
 
 @app.get("/videos")
