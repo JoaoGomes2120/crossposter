@@ -84,7 +84,6 @@ async def add_video(user_id: str, source_url: str, caption: str):
     conn.commit()
     conn.close()
 
-    # Envia job via REST API do Upstash (sem problemas de SSL)
     if UPSTASH_URL and UPSTASH_TOKEN:
         job = json.dumps({
             "post_id":      post_id,
@@ -109,6 +108,12 @@ def get_videos(user_id: str):
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+@app.get("/debug-users")
+def debug_users():
+    conn = get_conn()
+    users = conn.execute("SELECT id, open_id, expires_at FROM users").fetchall()
+    return [dict(u) for u in users]
 
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(user_id: str = ""):
