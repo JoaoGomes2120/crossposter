@@ -1,6 +1,5 @@
 import os, secrets, uuid, sqlite3, json
 import httpx
-import redis as redis_lib
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
 from db.database import init_db, get_conn
@@ -11,7 +10,8 @@ app = FastAPI()
 CLIENT_ID     = os.getenv("TIKTOK_CLIENT_ID")
 CLIENT_SECRET = os.getenv("TIKTOK_CLIENT_SECRET")
 REDIRECT_URI  = os.getenv("TIKTOK_REDIRECT_URI")
-REDIS_URL     = os.getenv("REDIS_URL")
+UPSTASH_URL   = os.getenv("UPSTASH_REDIS_REST_URL")
+UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN")
 
 @app.on_event("startup")
 def startup():
@@ -84,15 +84,20 @@ async def add_video(user_id: str, source_url: str, caption: str):
     conn.commit()
     conn.close()
 
-    if REDIS_URL:
-        r = redis_lib.from_url(REDIS_URL, ssl_cert_reqs=None)
+    # Envia job via REST API do Upstash (sem problemas de SSL)
+    if UPSTASH_URL and UPSTASH_TOKEN:
         job = json.dumps({
             "post_id":      post_id,
             "source_url":   source_url,
             "caption":      caption,
             "access_token": user["access_token"],
         })
-        r.rpush("crossposter:queue", job)
+        async with httpx.AsyncClient() as client:
+            await client.post(
+                f"{UPSTASH_URL}/rpush/crossposter:queue",
+                headers={"Authorization": f"Bearer {UPSTASH_TOKEN}"},
+                json=[job],
+            )
 
     return {"status": "adicionado", "post_id": post_id}
 
