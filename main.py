@@ -1,25 +1,19 @@
-import os, secrets, uuid, httpx
-from fastapi import FastAPI, Depends
+import os, secrets, uuid, sqlite3
+import httpx
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from contextlib import asynccontextmanager
-from db.database import init_db, get_db
-from db.models import User, VideoPost
+from db.database import init_db, get_conn
 from datetime import datetime, timezone, timedelta
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await init_db()
-    yield
+app = FastAPI()
 
-app = FastAPI(lifespan=lifespan)
+CLIENT_ID     = os.getenv("TIKTOK_CLIENT_ID")
+CLIENT_SECRET = os.getenv("TIKTOK_CLIENT_SECRET")
+REDIRECT_URI  = os.getenv("TIKTOK_REDIRECT_URI")
 
-CLIENT_ID    = os.getenv("TIKTOK_CLIENT_ID")
-CLIENT_SECRET= os.getenv("TIKTOK_CLIENT_SECRET")
-REDIRECT_URI = os.getenv("TIKTOK_REDIRECT_URI")
-
-# ── Auth ──────────────────────────────────────────────────────────────────────
+@app.on_event("startup")
+def startup():
+    init_db()
 
 @app.get("/login")
 def login():
@@ -35,7 +29,7 @@ def login():
     return RedirectResponse(url)
 
 @app.get("/auth/callback")
-async def auth_callback(code: str = None, error: str = None, db: AsyncSession = Depends(get_db)):
+async def auth_callback(code: str = None, error: str = None):
     if error or not code:
         return {"error": error or "codigo nao recebido"}
 
@@ -55,49 +49,47 @@ async def auth_callback(code: str = None, error: str = None, db: AsyncSession = 
     if "access_token" not in data:
         return {"error": data}
 
-    # Salva ou atualiza usuário no banco
-    result = await db.execute(select(User).where(User.open_id == data["open_id"]))
-    user = result.scalar_one_or_none()
-    if not user:
-        user = User(id=str(uuid.uuid4()), open_id=data["open_id"])
-        db.add(user)
+    conn = get_conn()
+    user_id = str(uuid.uuid4())
+    open_id = data["open_id"]
+    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=data["expires_in"])).isoformat()
 
-    user.access_token  = data["access_token"]
-    user.refresh_token = data.get("refresh_token", "")
-    user.expires_at    = datetime.now(timezone.utc) + timedelta(seconds=data["expires_in"])
-    await db.commit()
+    existing = conn.execute("SELECT id FROM users WHERE open_id=?", (open_id,)).fetchone()
+    if existing:
+        user_id = existing["id"]
+        conn.execute("UPDATE users SET access_token=?, refresh_token=?, expires_at=? WHERE open_id=?",
+            (data["access_token"], data.get("refresh_token",""), expires_at, open_id))
+    else:
+        conn.execute("INSERT INTO users VALUES (?,?,?,?,?)",
+            (user_id, open_id, data["access_token"], data.get("refresh_token",""), expires_at))
+    conn.commit()
+    conn.close()
 
-    return RedirectResponse(f"/dashboard?user_id={user.id}")
-
-# ── Videos ───────────────────────────────────────────────────────────────────
+    return RedirectResponse(f"/dashboard?user_id={user_id}")
 
 @app.post("/add-video")
-async def add_video(user_id: str, source_url: str, caption: str, db: AsyncSession = Depends(get_db)):
-    post = VideoPost(
-        id=str(uuid.uuid4()),
-        user_id=user_id,
-        source_url=source_url,
-        caption=caption,
-        status="PENDING",
-    )
-    db.add(post)
-    await db.commit()
-    return {"status": "adicionado", "post_id": post.id}
+def add_video(user_id: str, source_url: str, caption: str):
+    conn = get_conn()
+    post_id = str(uuid.uuid4())
+    conn.execute("INSERT INTO video_posts VALUES (?,?,?,?,?,?,?,?)",
+        (post_id, user_id, source_url, caption, "PENDING", None, None,
+         datetime.now(timezone.utc).isoformat()))
+    conn.commit()
+    conn.close()
+    return {"status": "adicionado", "post_id": post_id}
 
 @app.get("/videos")
-async def get_videos(user_id: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(VideoPost).where(VideoPost.user_id == user_id).order_by(VideoPost.created_at.desc())
-    )
-    posts = result.scalars().all()
-    return [{"id": p.id, "caption": p.caption, "source_url": p.source_url, "status": p.status} for p in posts]
-
-# ── Dashboard ─────────────────────────────────────────────────────────────────
+def get_videos(user_id: str):
+    conn = get_conn()
+    rows = conn.execute(
+        "SELECT * FROM video_posts WHERE user_id=? ORDER BY created_at DESC", (user_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard(user_id: str = "", db: AsyncSession = Depends(get_db)):
-    return f"""
-<!DOCTYPE html>
+def dashboard(user_id: str = ""):
+    return f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -111,19 +103,18 @@ async def dashboard(user_id: str = "", db: AsyncSession = Depends(get_db)):
   input, textarea {{ width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #333; background: #111; color: #fff; font-size: 14px; margin-top: 6px; }}
   textarea {{ height: 80px; resize: none; }}
   label {{ font-size: 12px; color: #aaa; }}
-  button {{ background: #fe2c55; color: #fff; border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; cursor: pointer; margin-top: 12px; }}
+  button {{ background: #fe2c55; color: #fff; border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; cursor: pointer; margin-top: 12px; width: 100%; }}
   button:hover {{ opacity: 0.85; }}
   .video-item {{ display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid #222; }}
   .badge {{ font-size: 11px; padding: 4px 10px; border-radius: 20px; font-weight: bold; }}
   .PENDING {{ background: #333; color: #aaa; }}
   .PUBLISHED {{ background: #1a3a2a; color: #4ade80; }}
   .FAILED {{ background: #3a1a1a; color: #f87171; }}
-  .url {{ font-size: 11px; color: #666; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }}
+  .url {{ font-size: 11px; color: #666; margin-top: 2px; }}
 </style>
 </head>
 <body>
 <h1>🎬 CrossPoster</h1>
-
 <div class="card">
   <label>URL do vídeo (sua conta)</label>
   <input type="text" id="url" placeholder="https://www.kwai.com/@voce/video/..."/>
@@ -131,15 +122,12 @@ async def dashboard(user_id: str = "", db: AsyncSession = Depends(get_db)):
   <textarea id="caption" placeholder="Legenda para o TikTok..."></textarea>
   <button onclick="addVideo()">+ Adicionar à fila</button>
 </div>
-
 <div class="card">
   <h2 style="font-size:15px;margin-bottom:12px">Fila de publicação</h2>
   <div id="video-list"><p style="color:#666;font-size:13px">Carregando...</p></div>
 </div>
-
 <script>
 const USER_ID = "{user_id}";
-
 async function loadVideos() {{
   const r = await fetch(`/videos?user_id=${{USER_ID}}`);
   const videos = await r.json();
@@ -155,7 +143,6 @@ async function loadVideos() {{
     </div>
   `).join('');
 }}
-
 async function addVideo() {{
   const url = document.getElementById('url').value.trim();
   const caption = document.getElementById('caption').value.trim();
@@ -165,15 +152,11 @@ async function addVideo() {{
   document.getElementById('caption').value = '';
   loadVideos();
 }}
-
 loadVideos();
 setInterval(loadVideos, 5000);
 </script>
 </body>
-</html>
-"""
-
-# ── Static ────────────────────────────────────────────────────────────────────
+</html>"""
 
 @app.get("/")
 def root():

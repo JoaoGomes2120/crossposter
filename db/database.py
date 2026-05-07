@@ -1,16 +1,34 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
-from db.models import Base
+import sqlite3, os
 
-DATABASE_URL = "sqlite+aiosqlite:///./crossposter.db"
+DB_PATH = "/tmp/crossposter.db"
 
-engine = create_async_engine(DATABASE_URL, echo=False)
-AsyncSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+def get_conn():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-async def init_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-async def get_db():
-    async with AsyncSessionLocal() as session:
-        yield session
+def init_db():
+    conn = get_conn()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            open_id TEXT UNIQUE,
+            access_token TEXT,
+            refresh_token TEXT,
+            expires_at TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS video_posts (
+            id TEXT PRIMARY KEY,
+            user_id TEXT,
+            source_url TEXT,
+            caption TEXT,
+            status TEXT DEFAULT 'PENDING',
+            publish_id TEXT,
+            error_msg TEXT,
+            created_at TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
