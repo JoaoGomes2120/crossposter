@@ -1,5 +1,6 @@
-import os, secrets, uuid, sqlite3
+import os, secrets, uuid, sqlite3, json
 import httpx
+import redis as redis_lib
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
 from db.database import init_db, get_conn
@@ -10,6 +11,7 @@ app = FastAPI()
 CLIENT_ID     = os.getenv("TIKTOK_CLIENT_ID")
 CLIENT_SECRET = os.getenv("TIKTOK_CLIENT_SECRET")
 REDIRECT_URI  = os.getenv("TIKTOK_REDIRECT_URI")
+REDIS_URL     = os.getenv("REDIS_URL")
 
 @app.on_event("startup")
 def startup():
@@ -82,10 +84,8 @@ async def add_video(user_id: str, source_url: str, caption: str):
     conn.commit()
     conn.close()
 
-    redis_url = os.getenv("REDIS_URL")
-    if redis_url:
-        import redis as redis_lib, json
-        r = redis_lib.from_url(redis_url)
+    if REDIS_URL:
+        r = redis_lib.from_url(REDIS_URL, ssl_cert_reqs=None)
         job = json.dumps({
             "post_id":      post_id,
             "source_url":   source_url,
