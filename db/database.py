@@ -1,8 +1,7 @@
-import os, sqlite3, httpx, json
+import httpx
 
 TURSO_URL   = "libsql://crossposter-joaogomes2120.aws-us-west-2.turso.io"
 TURSO_TOKEN = "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJhIjoicnciLCJpYXQiOjE3NzgxODc5ODQsImlkIjoiMDE5ZTA0NDEtZWEwMS03NWI1LWIzNDQtZjRhZWFjYWY2ZWY3IiwicmlkIjoiOWNmY2UzZTctOWZmNi00OWYyLTk1MDEtOTIyMjFjMzVmMDkzIn0.5bJpHG61VivN7kC1FkSZPHpqWar0NOOK7w-mt2kl2TAmJrjzAcNfjJyhM5Whm0u4jFNln78a9sK_SSEv0GPbAQ"
-
 TURSO_HTTP  = "https://crossposter-joaogomes2120.aws-us-west-2.turso.io"
 
 def turso_execute(sql, args=[]):

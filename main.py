@@ -27,6 +27,7 @@ def login():
         f"&scope=user.info.basic,video.upload,video.publish"
         f"&redirect_uri={REDIRECT_URI}"
         f"&state={state}"
+        f"&prompt=consent"
     )
     return RedirectResponse(url)
 
