@@ -45,5 +45,8 @@ def init_db():
         end_hour INTEGER DEFAULT 22,
         auto_delete BOOLEAN DEFAULT 1)""")
 
-    # Attempt to add published_at column to video_posts in case it doesn't exist
-    turso_execute("ALTER TABLE video_posts ADD COLUMN published_at TEXT;")
+    # Add published_at column - ignore error if it already exists
+    try:
+        turso_execute("ALTER TABLE video_posts ADD COLUMN published_at TEXT;")
+    except Exception:
+        pass

@@ -1,4 +1,4 @@
-import os, secrets, uuid, json
+import os, secrets, uuid, json, sys
 import httpx
 import threading, subprocess
 from fastapi import FastAPI
@@ -16,7 +16,7 @@ REDIRECT_URI  = os.getenv("TIKTOK_REDIRECT_URI")
 def startup():
     init_db()
     def run_worker():
-        subprocess.run(["python", "-u", "worker.py"])
+        subprocess.run([sys.executable, "-u", "worker.py"])
     threading.Thread(target=run_worker, daemon=True).start()
 
 @app.get("/login")

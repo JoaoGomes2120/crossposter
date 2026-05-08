@@ -112,9 +112,9 @@ def determine_jobs_to_run():
         else:
             cfg = cfg[0]
 
-        start_h = cfg["start_hour"]
-        end_h = cfg["end_hour"]
-        posts_per_day = cfg["posts_per_day"]
+        start_h = int(cfg.get("start_hour") or 8)
+        end_h = int(cfg.get("end_hour") or 22)
+        posts_per_day = int(cfg.get("posts_per_day") or 1)
         
         # O post so entra pra avaliação se estivermos na janela diária pretendida
         if not (start_h <= hour <= end_h):
