@@ -14,7 +14,11 @@ REDIRECT_URI  = os.getenv("TIKTOK_REDIRECT_URI")
 
 @app.on_event("startup")
 def startup():
+    import subprocess as sp
     init_db()
+    # Install chromium browser for Playwright (safe to run multiple times)
+    sp.run([sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
+           capture_output=True)
     def run_worker():
         subprocess.run([sys.executable, "-u", "worker.py"])
     threading.Thread(target=run_worker, daemon=True).start()
@@ -116,6 +120,14 @@ def debug_users():
 
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard(user_id: str = ""):
+    # Check if browser cookies are configured
+    cookie_row = turso_query("SELECT updated_at FROM browser_cookies WHERE user_id=?", [user_id]) if user_id else []
+    browser_status = cookie_row[0]["updated_at"] if cookie_row else None
+    browser_badge = (
+        f'<span style="font-size:11px;background:#1a3a2a;color:#4ade80;padding:4px 10px;border-radius:20px;font-weight:bold;">✓ Browser Conectado</span>'
+        if browser_status else
+        f'<span style="font-size:11px;background:#3a1a1a;color:#f87171;padding:4px 10px;border-radius:20px;font-weight:bold;">✗ Browser Nao Configurado</span>'
+    )
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -148,6 +160,7 @@ def dashboard(user_id: str = ""):
   <div>
     <h2 style="font-size:15px;margin-bottom:4px">Definições de Postagem Automática</h2>
     <p style="font-size:12px;color:#aaa">O sistema publicará automaticamente na janela de 08:00 às 22:00.</p>
+    <div style="margin-top:8px">{browser_badge}</div>
   </div>
   <div style="display:flex; gap:8px; align-items:center;">
     <label>Vídeos por dia:</label>

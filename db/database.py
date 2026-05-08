@@ -45,6 +45,11 @@ def init_db():
         end_hour INTEGER DEFAULT 22,
         auto_delete BOOLEAN DEFAULT 1)""")
 
+    turso_execute("""CREATE TABLE IF NOT EXISTS browser_cookies (
+        user_id TEXT PRIMARY KEY,
+        cookies_json TEXT,
+        updated_at TEXT)""")
+
     # Add published_at column - ignore error if it already exists
     try:
         turso_execute("ALTER TABLE video_posts ADD COLUMN published_at TEXT;")
