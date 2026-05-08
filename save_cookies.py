@@ -38,18 +38,27 @@ def main():
     print()
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context(
+        import tempfile, os
+        user_dir = os.path.join(tempfile.gettempdir(), 'tiktok_login_dir')
+        
+        context = p.chromium.launch_persistent_context(
+            user_data_dir=user_dir,
+            headless=False,
             viewport={"width": 1280, "height": 720},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            args=["--disable-blink-features=AutomationControlled"]
         )
-        page = context.new_page()
+        
+        page = context.pages[0] if context.pages else context.new_page()
         page.goto("https://www.tiktok.com/login")
 
-        input("\n>>> Fez login? Aperte ENTER aqui para salvar os cookies... ")
+        while True:
+            resp = input("\n>>> FEZ LOGIN? Digite 'OK' e aperte ENTER para salvar os cookies: ")
+            if resp.strip().lower() == 'ok':
+                break
 
         cookies = context.cookies()
-        browser.close()
+        context.close()
 
     if not cookies:
         print("ERRO: Nenhum cookie capturado. Tente novamente.")
