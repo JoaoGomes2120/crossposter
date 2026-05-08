@@ -21,7 +21,18 @@ def download_video(url, output_path):
 
 def upload_to_tiktok(video_path, access_token, caption):
     file_size = os.path.getsize(video_path)
-    chunk_size = 10_000_000
+
+    # TikTok requires chunk_size between 5MB and 64MB
+    # For small files (<= 5MB), use the file size itself as the chunk size
+    MIN_CHUNK = 5 * 1024 * 1024   # 5 MB
+    MAX_CHUNK = 64 * 1024 * 1024  # 64 MB
+
+    if file_size <= MIN_CHUNK:
+        # Single-chunk upload: chunk_size == file_size
+        chunk_size = file_size
+    else:
+        chunk_size = min(10 * 1024 * 1024, MAX_CHUNK)  # 10 MB preferred
+
     total_chunks = math.ceil(file_size / chunk_size)
 
     headers = {
@@ -29,7 +40,7 @@ def upload_to_tiktok(video_path, access_token, caption):
         "Content-Type": "application/json; charset=UTF-8",
     }
 
-    # Init
+    # Init — declare EXACTLY what we will send
     init_resp = httpx.post(
         "https://open.tiktokapis.com/v2/post/publish/video/init/",
         headers=headers,
@@ -48,31 +59,37 @@ def upload_to_tiktok(video_path, access_token, caption):
                 "total_chunk_count": total_chunks,
             },
         },
+        timeout=30,
     ).json()
 
     print(f"Init response: {init_resp}")
 
     if "data" not in init_resp:
-        return None, init_resp.get("error", {}).get("message", "erro desconhecido")
+        err = init_resp.get("error", {})
+        return None, err.get("message") or str(init_resp)
 
     publish_id = init_resp["data"]["publish_id"]
     upload_url = init_resp["data"]["upload_url"]
 
-    # Upload chunks
+    # Upload chunks — each chunk must be exactly chunk_size except the last
     with open(video_path, "rb") as f:
         chunk_index = 0
-        while chunk := f.read(chunk_size):
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
             start = chunk_index * chunk_size
             end   = start + len(chunk) - 1
-            httpx.put(
+            resp = httpx.put(
                 upload_url,
                 content=chunk,
                 headers={
                     "Content-Range": f"bytes {start}-{end}/{file_size}",
                     "Content-Type":  "video/mp4",
                 },
+                timeout=120,
             )
-            print(f"Chunk {chunk_index+1}/{total_chunks} enviado")
+            print(f"Chunk {chunk_index+1}/{total_chunks} enviado — status {resp.status_code}")
             chunk_index += 1
 
     return publish_id, None
